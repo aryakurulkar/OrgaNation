@@ -173,15 +173,11 @@ public class HospitalRecipientRequestsActivity extends AppCompatActivity {
         
         // Set donor match listener for hospital users
         requestAdapter.setOnDonorMatchListener(request -> {
-            // Convert RequestModel to RecipientModel for matching
-            RecipientModel recipient = convertRequestToRecipient(request);
-            if (recipient != null) {
+            convertRequestToRecipientWithAge(request, recipient -> {
                 Intent intent = new Intent(this, DonorMatchingReportActivity.class);
                 intent.putExtra("recipient", recipient);
                 startActivity(intent);
-            } else {
-                Toast.makeText(this, "Error: Unable to process recipient data", Toast.LENGTH_SHORT).show();
-            }
+            });
         });
     }
 
@@ -472,30 +468,41 @@ public class HospitalRecipientRequestsActivity extends AppCompatActivity {
         
         return true;
     }
-    
-    private RecipientModel convertRequestToRecipient(RequestModel request) {
-        try {
-            RecipientModel recipient = new RecipientModel();
-            recipient.setFullName(request.getRecipientName());
-            recipient.setAadhaarNo(request.getRecipientAadhaar());
-            recipient.setBloodGroup(request.getBloodType());
-            recipient.setOrgansNeeded(request.getOrganType());
-            recipient.setUrgency(request.getUrgency());
-            
-            // Add debug logging
-            Log.d("HospitalRequests", "Converting request to recipient:");
-            Log.d("HospitalRequests", "  Recipient Name: " + request.getRecipientName());
-            Log.d("HospitalRequests", "  Blood Type: " + request.getBloodType());
-            Log.d("HospitalRequests", "  Organ Type: " + request.getOrganType());
-            
-            // Load complete hospital details
+
+    private void convertRequestToRecipientWithAge(RequestModel request,
+                                                  java.util.function.Consumer<RecipientModel> onComplete) {
+        RecipientModel recipient = new RecipientModel();
+        recipient.setFullName(request.getRecipientName());
+        recipient.setAadhaarNo(request.getRecipientAadhaar());
+        recipient.setBloodGroup(request.getBloodType());
+        recipient.setOrgansNeeded(request.getOrganType());
+        recipient.setUrgency(request.getUrgency());
+
+        // Fetch age from Recepients collection using Aadhaar
+        String aadhaar = request.getRecipientAadhaar();
+        if (aadhaar != null && !aadhaar.isEmpty()) {
+            db.collection("Recepients").document(aadhaar)
+                    .get()
+                    .addOnSuccessListener(doc -> {
+                        if (doc.exists()) {
+                            String age = doc.get(com.google.firebase.firestore.FieldPath.of("04]Age")) != null ?
+                                    doc.get(com.google.firebase.firestore.FieldPath.of("04]Age")).toString() : null;
+                            if (age != null) {
+                                recipient.setAge(age);
+                                Log.d("HospitalRequests", "Recipient age loaded: " + age);
+                            }
+                        }
+                        loadCompleteHospitalDetails(request, recipient);
+                        onComplete.accept(recipient);
+                    })
+                    .addOnFailureListener(e -> {
+                        Log.e("HospitalRequests", "Failed to fetch recipient age", e);
+                        loadCompleteHospitalDetails(request, recipient);
+                        onComplete.accept(recipient);
+                    });
+        } else {
             loadCompleteHospitalDetails(request, recipient);
-            
-            return recipient;
-        } catch (Exception e) {
-            Log.e("HospitalRequests", "Error converting request to recipient", e);
-            e.printStackTrace();
-            return null;
+            onComplete.accept(recipient);
         }
     }
     
